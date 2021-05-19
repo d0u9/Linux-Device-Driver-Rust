@@ -1,16 +1,8 @@
-# Prerequisites
-*.d
-
 # Object files
 *.o
 *.ko
 *.obj
 *.elf
-
-# Linker output
-*.ilk
-*.map
-*.exp
 
 # Precompiled Headers
 *.gch
@@ -38,15 +30,11 @@
 
 # Debug files
 *.dSYM/
-*.su
-*.idb
-*.pdb
 
-# Kernel Module Compile Results
-*.mod*
+# Others
 *.cmd
-.tmp_versions/
-modules.order
-Module.symvers
-Mkfile.old
-dkms.conf
+*.symvers
+*.mod.c
+*.order
+.tmp_versions
+*.swp
