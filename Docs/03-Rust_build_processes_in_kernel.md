@@ -61,7 +61,35 @@ In Rust in Kernel, `exports.o` and `helpers.o` are such type of generation.
 They are compiled from `exports.c` and `helpers.c` respectively via make's
 implicit rule.
 
+## Objects generated from Rust
 
+Object files other than those generated from C source are compiled from Rust
+souce files. Currently, these object files are: `core.o`, `compiler_builtins.o`,
+`alloc.o`, `kernel.o`, `build_error.o`. Two files, `core.o` and `alloc.o` are
+compiled from Rust's source code, i.e. core and alloc components, and
+`compiler_builtins.o` is special for clang's codegen to mute some types of
+link error.
+
+These objects are directly linked into kernel's vmlinux image via Kbuild's
+`obj-$(CONFIG_RUST)` directives.
+
+It is important to note that these the size of these objects finally contributes
+to the total size of vmlinux image. So, for some space critical scenarios (for
+example, embedded devices), reduces the size of these object files is important.
+
+## Extra Targets
+
+Extra targets are those needed for building vmlinux, but not combined into built-in.a.
+
+Usually, extra targets are head objects or vmlinux linker scripts.
+
+`exports_core_generated.h`, `libmacros.so`, `bindings_generated.rs`,
+`exports_alloc_generated.h`, `exports_kernel_generated.h`.
+
+# Build Kernel Module
+
+Like build normal C kernel modules, rust modules utilise symbols exported by
+kernel source. For rust, it is symbols that are exported by rust subsystem.
 
 [bindgen]: https://github.com/rust-lang/rust-bindgen
 [libclang]: https://clang.llvm.org/docs/Tooling.html#libclang
