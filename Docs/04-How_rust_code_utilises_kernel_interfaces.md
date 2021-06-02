@@ -84,4 +84,19 @@ panic.
 
 Obviously, this implementation is crude, but is the fastest way.
 
+## How Rust uses our libcore instead of libstd.
+
+It is all about `--extern` flag and symbols.
+
+`--extern` flag of `rustc` command specifies the location of an exteranl
+library. Indirect dependencies are located using the `-L` flag. `--extern`
+flag just makes rust compiler to link libraries that complement the missing
+symbols during linkage phase. During the runtime, symbol findings are
+automatically done by kernel itself.
+
+This flag also applies to buding out-tree modules. However, different from
+building Rust support in kernel itself, building an out-tree module needs to
+link `kernel` only. `kernel` in trun depends on `alloc` and `core` libraries
+we have discuessed before.
+
 
