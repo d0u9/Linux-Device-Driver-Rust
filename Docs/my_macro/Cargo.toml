@@ -1,0 +1,18 @@
+[package]
+name = "my_macro"
+version = "0.1.0"
+authors = ["d0u9 <d0u9.su@outlook.com>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+
+[[bin]]
+name = "my_bin"
+path = "src/main.rs"
+
+[lib]
+name = "my_macros"
+path = "src/lib/lib.rs"
+proc-macro = true
