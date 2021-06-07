@@ -97,8 +97,45 @@ This is my answer: 1234
 Are you confused by the line `This line is printed in macro`? Would it be
 printed after the line `Running xxxx`? That is the key of macro.
 
+### Use `rustc` directly
 
+For Rust in Kernel, we use bare `rustc` compiler instead of redundant `cargo`
+tool.
 
+For our example before, to compile it in an executable, compose a `Makefile`:
+
+```makefile
+BUILD_DIR ?= $(shell mkdir -p build; echo build)
+BIN := my_bin
+BIN_SRC := src/main.rs
+MACRO_LIB := my_macros
+MACRO_LIB_FILE := $(addprefix lib,$(addsuffix .so,$(MACRO_LIB)))
+MACRO_SRC := src/lib/lib.rs
+MACRO_FLAGS := --emit=obj,link \
+			   --extern proc_macro \
+			   --crate-type proc-macro \
+			   --crate-name $(MACRO_LIB) \
+			   --out-dir $(BUILD_DIR)
+
+$(BUILD_DIR)/$(BIN): $(BIN_SRC) $(MACRO_LIB_FILE)
+	rustc -o $@ --extern $(MACRO_LIB) -L $(BUILD_DIR) $<
+
+$(MACRO_LIB_FILE): $(MACRO_SRC)
+	rustc $(MACRO_FLAGS) $^
+
+.PHONY: clean
+clean:
+	rm -fr $(BUILD_DIR)
+```
+
+The Makefile makes compiling procedure more clearly than cargo which has an
+simple one-shot operation. The compiling process contains two phases: 1) build
+macro_proc library; 2) build our executable binary.
+
+The proc_macro is special, that all proc_macros are compiled into a dynamic
+libraries and then is feed to rustc compiler. The string "This line is printed
+in macro" is printed in our macro_proc function during the compiling time. This
+means macro_proc functions are invoked by compiler other than our code.
 
 [Function-like macro]: https://doc.rust-lang.org/reference/procedural-macros.html#function-like-procedural-macros
 [hygienic macros]: https://en.wikipedia.org/wiki/Hygienic_macro
