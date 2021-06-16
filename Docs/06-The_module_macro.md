@@ -137,6 +137,182 @@ libraries and then is feed to rustc compiler. The string "This line is printed
 in macro" is printed in our macro_proc function during the compiling time. This
 means macro_proc functions are invoked by compiler other than our code.
 
+## Real module macro
+
+We have understanded what is a Rust's procedural macro and how it is expaned
+by an example. It is time to play around with real module macro.
+
+For writing kernel modules in C, it always starts with two functions(they are
+actually C macros), `module_init()` and `module_exit()`, and some auxiliary
+macros, e.g. `MODULE_LICENSE()`, `MODULE_AUTHOR()`, `MODULE_DESCRIPTION()`.
+
+For kernel modules in Rust, a macro named `module!{ }` is used to describe
+the behavior what our module will have.
+
+```rust
+module! {
+    type: RustModuleParameters,
+    name: b"rust_module_parameters",
+    author: b"Rust for Linux Contributors",
+    description: b"Rust module parameters sample",
+    license: b"GPL v2",
+    params: {
+        my_bool: bool {
+            default: true,
+            permissions: 0,
+            description: b"Example of bool",
+        },
+        my_i32: i32 {
+            default: 42,
+            permissions: 0o644,
+            description: b"Example of i32",
+        },
+    },
+}
+```
+
+This macro will be expanded during compiling time. For curious readers who
+wonder what is the results of output, it is convenient to use rustc's
+`--pretty=expanded` option to inspect. `--pretty=expanded` is an option that is
+only available when `-Zunstable-options` is also enabled.
+
+The generated content after macro expansion looks like:
+
+```rust
+/// The module name.
+///
+/// Used by the printing macros, e.g. [`info!`].
+const __LOG_PREFIX: &[u8] = b"test_module\0";
+static mut __MOD: Option<RustModuleParameters> = None;
+#[cfg(MODULE)]
+static THIS_MODULE: kernel::ThisModule =
+    unsafe { kernel::ThisModule::from_ptr(&kernel::bindings::__this_module as *const _ as *mut _) };
+#[cfg(MODULE)]
+#[no_mangle]
+pub extern "C" fn init_module() -> kernel::c_types::c_int {
+    __init()
+}
+#[cfg(MODULE)]
+#[no_mangle]
+pub extern "C" fn cleanup_module() {
+    __exit()
+}
+fn __init() -> kernel::c_types::c_int {
+    match <RustModuleParameters as kernel::KernelModule>::init() {
+        Ok(m) => {
+            unsafe {
+                __MOD = Some(m);
+            }
+            return 0;
+        }
+        Err(e) => {
+            return e.to_kernel_errno();
+        }
+    }
+}
+fn __exit() {
+    unsafe {
+        __MOD = None;
+    }
+}
+#[cfg(MODULE)]
+#[link_section = ".modinfo"]
+#[used]
+pub static __test_module_author: [u8; 35] = *b"author=Rust for Linux Contributors\0";
+#[cfg(MODULE)]
+#[link_section = ".modinfo"]
+#[used]
+pub static __test_module_description: [u8; 42] = *b"description=Rust module parameters sample\0";
+#[cfg(MODULE)]
+#[link_section = ".modinfo"]
+#[used]
+pub static __test_module_license: [u8; 15] = *b"license=GPL v2\0";
+#[cfg(MODULE)]
+#[link_section = ".modinfo"]
+#[used]
+pub static __test_module_parmtype_my_bool: [u8; 22] = *b"parmtype=my_bool:bool\0";
+#[cfg(MODULE)]
+#[link_section = ".modinfo"]
+#[used]
+pub static __test_module_parm_my_bool: [u8; 29] = *b"parm=my_bool:Example of bool\0";
+static mut __test_module_my_bool_value: bool = true;
+struct __test_module_my_bool;
+impl __test_module_my_bool {
+    fn read(&self) -> &<bool as kernel::module_param::ModuleParam>::Value {
+        unsafe { <bool as kernel::module_param::ModuleParam>::value(&__test_module_my_bool_value) }
+    }
+}
+const my_bool: __test_module_my_bool = __test_module_my_bool;
+#[repr(transparent)]
+struct __test_module_my_bool_RacyKernelParam(kernel::bindings::kernel_param);
+unsafe impl Sync for __test_module_my_bool_RacyKernelParam {}
+#[cfg(MODULE)]
+const __test_module_my_bool_name: *const kernel::c_types::c_char =
+    b"my_bool\0" as *const _ as *const kernel::c_types::c_char;
+#[link_section = "__param"]
+#[used]
+static __test_module_my_bool_struct: __test_module_my_bool_RacyKernelParam =
+    __test_module_my_bool_RacyKernelParam(kernel::bindings::kernel_param {
+        name: __test_module_my_bool_name,
+
+        #[cfg(MODULE)]
+        mod_: unsafe { &kernel::bindings::__this_module as *const _ as *mut _ },
+        ops: unsafe { &kernel::module_param::PARAM_OPS_BOOL }
+            as *const kernel::bindings::kernel_param_ops,
+        perm: 0,
+        level: -1,
+        flags: 0,
+        __bindgen_anon_1: kernel::bindings::kernel_param__bindgen_ty_1 {
+            arg: unsafe { &__test_module_my_bool_value } as *const _
+                as *mut kernel::c_types::c_void,
+        },
+    });
+#[cfg(MODULE)]
+#[link_section = ".modinfo"]
+#[used]
+pub static __test_module_parmtype_my_i32: [u8; 20] = *b"parmtype=my_i32:i32\0";
+#[cfg(MODULE)]
+#[link_section = ".modinfo"]
+#[used]
+pub static __test_module_parm_my_i32: [u8; 27] = *b"parm=my_i32:Example of i32\0";
+static mut __test_module_my_i32_value: i32 = 267390960;
+struct __test_module_my_i32;
+impl __test_module_my_i32 {
+    fn read<'lck>(
+        &self,
+        lock: &'lck kernel::KParamGuard,
+    ) -> &'lck <i32 as kernel::module_param::ModuleParam>::Value {
+        unsafe { <i32 as kernel::module_param::ModuleParam>::value(&__test_module_my_i32_value) }
+    }
+}
+const my_i32: __test_module_my_i32 = __test_module_my_i32;
+#[repr(transparent)]
+struct __test_module_my_i32_RacyKernelParam(kernel::bindings::kernel_param);
+unsafe impl Sync for __test_module_my_i32_RacyKernelParam {}
+#[cfg(MODULE)]
+const __test_module_my_i32_name: *const kernel::c_types::c_char =
+    b"my_i32\0" as *const _ as *const kernel::c_types::c_char;
+#[link_section = "__param"]
+#[used]
+static __test_module_my_i32_struct: __test_module_my_i32_RacyKernelParam =
+    __test_module_my_i32_RacyKernelParam(kernel::bindings::kernel_param {
+        name: __test_module_my_i32_name,
+
+        #[cfg(MODULE)]
+        mod_: unsafe { &kernel::bindings::__this_module as *const _ as *mut _ },
+        ops: unsafe { &kernel::module_param::PARAM_OPS_I32 }
+            as *const kernel::bindings::kernel_param_ops,
+        perm: 0o644,
+        level: -1,
+        flags: 0,
+        __bindgen_anon_1: kernel::bindings::kernel_param__bindgen_ty_1 {
+            arg: unsafe { &__test_module_my_i32_value } as *const _ as *mut kernel::c_types::c_void,
+        },
+    });
+```
+
+This is a very long code. I will detail this in next article.
+
 [Function-like macro]: https://doc.rust-lang.org/reference/procedural-macros.html#function-like-procedural-macros
 [hygienic macros]: https://en.wikipedia.org/wiki/Hygienic_macro
 [not hygiene]: https://doc.rust-lang.org/reference/procedural-macros.html#procedural-macro-hygiene
