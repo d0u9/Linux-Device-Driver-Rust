@@ -19,7 +19,8 @@ static struct example_module module_struct;
 static int __init m_init(void)
 {
     module_struct.version = uint_param;
-    pr_info("Hello World! uint_prarm=%u\n", module_struct.version);
+    pr_info("Hello World! uint_param=%u\n", module_struct.version);
+    pr_info("Address of module parameter uint_param: %px\n", &uint_param);
     return 0;
 }
 

@@ -408,12 +408,109 @@ which a special string "parmtype=uint_param:uint" is written in. This variable
 is linked into `modiinfo` section and be used by tools such as `modinfo` to
 fetch information about this module.
 
-### Parsing paramter
+### Apply relocation
 
-### Rewriting paramter
+`apply_relocate()` function is responsible for applying relocation to our
+kernel module. We primarily focus on relocation of `__param` section in ELF
+file. This sections contains data structures which describes the parameters
+a kernel have.
 
+Hex data dumped below are what content in `__param` section before and after
+relocation is taken in action. These data is directly printed in kernel log
+by hacking kernel.
 
+```
+before: (____ptrval____): 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00  ................
+before: (____ptrval____): 00 00 00 00 00 00 00 00 24 01 ff 00 00 00 00 00  ........$.......
+before: (____ptrval____): 00 00 00 00 00 00 00 00                          ........
+```
 
+```
+after: (____ptrval____): 00 50 33 c0 ff ff ff ff 40 60 33 c0 ff ff ff ff  .P3.....@`3.....
+after: (____ptrval____): 60 c2 80 85 ff ff ff ff 24 01 ff 00 00 00 00 00  `.......$.......
+after: (____ptrval____): 00 60 33 c0 ff ff ff ff                          .`3.....
+```
+
+For our example, `__param` section only contains single `struct kernel_param`
+data structure describes `static u32 uint_param` parameter. The last field of
+`struct kernel_param` an union type. Our `static u32 uint_param` parameter
+fits in the void `*arg` type option.
+```c
+union {
+        void *arg;
+        const struct kparam_string *str;
+        const struct kparam_array *arr;
+};
+```
+
+It has the value `0xffffffc0336000`, i.e. the address of kernel parameter. This
+is verified by looking the kernel log that we print this address by `pr_info()`
+function in our code.
+
+```
+Hello World! uint_param=1
+Address of module parameter uint_param: ffffffffc0336000
+```
+
+Also, it is not hard to find the address of `param_set_uint()` by decoding this
+binary according to `struct kernel_param_ops`. The address `0xffffffff8200c260`
+points the `struct kernel_param_ops` structure. Grep this address in kernel's
+symbol table file (System.map file in the root of your kernel source, it will
+be generated after successfully compiling kernel module).
+
+```
+grep param_ops_uint System.map
+
+ffffffff8200c260 D param_ops_uint
+```
+
+Note: You may find that the address printed in kernel log and obtained from
+System.map file are mismatched. This is due to `KASLR` (Kernel address space
+layout randomization), and you can disable `KASLR` by appending `nokaslr`
+kernel parameter. For QEMU users, add this in your `-append` option.
+
+### Parsing parameters passed in via `init_module()` system call
+
+First copy parameter string from user space to kernel:
+
+```c
+mod->args = strndup_user(uargs, ~0UL >> 1);
+if (IS_ERR(mod->args)) {
+    err = PTR_ERR(mod->args);
+    goto free_arch_cleanup;
+}
+```
+
+Then parsing it in function `parse_args()`:
+
+```c
+after_dashes = parse_args(mod->name, mod->args, mod->kp, mod->num_kp,
+              -32768, 32767, mod,
+              unknown_module_param_cb);
+```
+
+In turn, it calls `parse_one()` function for parsing single parameter:
+
+```c
+ret = parse_one(param, val, doing, params, num,
+				min_level, max_level, arg, unknown);
+```
+
+For each parameter passed in, first compare the parameter name against paramters
+in `__param` (Note: params[] is an array of type `struct kernel_param` which
+is read directly from `__param` section after relocation). Then, after some
+checks, set the variable value by calling `set()` function on it.
+
+For our `uint` type parameter, this is done via `strtolfn()` function actually.
+
+```c
+if (parameq(param, params[i].name)) {
+    ...
+    if (param_check_unsafe(&params[i]))
+				err = params[i].ops->set(val, &params[i]);
+    ...
+}
+```
 
 [init_module]: https://man7.org/linux/man-pages/man2/init_module.2.html]
 [kernel/module.c]: https://github.com/torvalds/linux/blob/master/kernel/module.c
