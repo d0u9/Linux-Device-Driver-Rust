@@ -512,7 +512,154 @@ if (parameq(param, params[i].name)) {
 }
 ```
 
+## `init` and `exit` function
+
+Modules' entry and exit function are defined via macro `module_init()` and
+macro `module_exit()`.
+
+For example:
+
+```
+module_init(m_init);
+module_exit(m_exit);
+```
+
+`m_init()` and `m_exit()` are two functions defined by user. Function declared
+in `module_init()`, i.e. `m_init()` in our example, is an entry point function
+which acts like `main()` function of our module and be called firstly when
+module is loaded. Function declared in `module_exit()` macro, `m_exit()` in our
+example, acts like a deconstructive usually in which some clean up works were
+taken.
+
+These two macros are expanded to:
+
+```c
+static inline \
+initcall_t __inittest(void)
+{
+    return m_init;
+}
+int init_module(void) __attribute__((alias("m_init")));;
+
+static inline
+exitcall_t __exittest(void)
+{
+    return m_exit;
+}
+void cleanup_module(void) __attribute__((alias("m_exit")));;
+```
+
+I have removed GCC's attributes to make codes more concise.
+
+`initcall_t` and `exitcall_t` are types defined as:
+
+```c
+typedef int (*initcall_t)(void);
+typedef void (*exitcall_t)(void);
+```
+
+`__inittest()` and `__exittest()` functions are test functions which verify
+the if the functions passed in macro matches the signature.
+
+The next two lines:
+
+```c
+int init_module(void) __attribute__((alias("m_init")));;
+void cleanup_module(void) __attribute__((alias("m_exit")));;
+```
+
+A special [alias attribute] `__attribute__((alias()));` is used. This attribute
+defines `m_init` to be a weak alias for `init_module` and `m_exit` to be a weak
+alias for `cleanup_module` symbol.
+
+## `init` and `exit` fields in `struct module`
+
+`struct module` contains two pointers, `int (*init)(void)` and
+`void (*exit)(void)`, which point to initialization and exit functions
+respectively.
+
+These two pointers are initialized in function `layout_and_allocate()` as:
+
+```c
+/* Module has been copied to its final place now: return it. */
+mod = (void *)info->sechdrs[info->index.mod].sh_addr;
+```
+
+The `info->sechdrs[]` is an array of ELF section headers. The section index
+we referenced here is `info->index.mod` which is assigned in `setup_load_info()`
+function:
+
+```c
+info->index.mod = find_sec(info, ".gnu.linkonce.this_module");
+if (!info->index.mod) {
+    pr_warn("%s: No module found in object\n",
+        info->name ?: "(missing .modinfo section or name field)");
+    return -ENOEXEC;
+}
+```
+
+Conclude from all above, `struct module` is initialized directly from
+`.gnu.linkonce.this_module` section in ELF file.
+
+To dig into this question more, we have to ask where is
+`.gnu.linkonce.this_module` section defined.
+
+This part is very tricky, for that `.gnu.linkonce.this_module` is not
+defined in kernel object files but instead defined in a post process program.
+
+You may find a line:
+
+```
+MODPOST /home/doug/ldd_root/nfs_dir/eg_test_c/Module.symvers
+```
+
+In building logs. That says we have made some post process for our module
+objects. It includes there several steps:
+
+```
+make -f ./scripts/Makefile.modpost
+  sed 's/\.ko$/\.o/' /home/doug/ldd_root/nfs_dir/eg_test_c/modules.order \
+  | scripts/mod/modpost -o /home/doug/ldd_root/nfs_dir/eg_test_c/Module.symvers -e -i Module.symvers -T -
+```
+
+You can find a function named `add_header()` in modpost's source code in
+`scripts/mod/modpost.c`.
+
+This function generates C source file by writing strings into a buffer. This
+buffer later be written into a file suffixed `.mod.c` in function
+`write_if_changed()`. This generated C source file will be compiled into object
+and linked together with our module's object files to make a new `.ko` file.
+
+We can find lines below in generated `.mod.c` file:
+
+```c
+__visible struct module __this_module
+__section(".gnu.linkonce.this_module") = {
+        .name = KBUILD_MODNAME,
+        .init = init_module,
+#ifdef CONFIG_MODULE_UNLOAD
+        .exit = cleanup_module,
+#endif
+        .arch = MODULE_ARCH_INIT,
+};
+```
+
+This structure attributed with `__section(".gnu.linkonce.this_module")` and
+will be put in `.gnu.linkonce.this_module` section finally in object file.
+
+`.init` and `.exit` fields are initialized to `init_module` and `cleanup_module`.
+These two symbols defined in our module source via macro `module_init()` and
+`module_exit()` which we have mentioned before.
+
+During the final linkage stage, all these object pieces are linked together into
+`.ko` file.
+
+During module loading process, `struct module` is read out from this ELF section
+directly, and our puzzle is resolved.
+
+
 [init_module]: https://man7.org/linux/man-pages/man2/init_module.2.html]
 [kernel/module.c]: https://github.com/torvalds/linux/blob/master/kernel/module.c
 [include/uapi/linux/elf.h]: https://github.com/torvalds/linux/blob/master/include/uapi/linux/elf.h
 [ELF]: https://en.wikipedia.org/wiki/Executable_and_Linkable_Format
+[alias attribute]: https://gcc.gnu.org/onlinedocs/gcc-4.7.2/gcc/Function-Attributes.html
