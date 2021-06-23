@@ -259,10 +259,190 @@ pub extern "C" fn cleanup_module() {
 }
 ```
 
-After compile this Rust into object, `init_module` and `cleanup_module` symbols
-is defined as strong symbols which will be used in `postmod`. When the module
-file is loaded, kernel's module loader will find these two functions and use
-them to init/cleanup module.
+After compiling this Rust into object, `init_module` and `cleanup_module`
+symbols is defined as strong symbols which will be used in `postmod`. When the
+module file is loaded, kernel's module loader will find these two functions and
+use them to init/cleanup module.
 
+Two functions, `__init()` and `__exit()`, are invoked in `init_module()`
+and `cleanup_module()` respectively. `__init()` function in turn calls
+our modulel structure's member fucntion `ExampleModule::init()`, in which
+`struct ExampleModule` is initialized.
+
+The `__exit()` function desn't nothing. That is because the `Drop` trait has
+been implemented for our `struct ExampleModule`, and the `drop()` function will
+be automaticall invoked when instace of `struct ExampleModule` goes out of its
+scope.
+
+## Build `modinfo` section
+
+We have talked that in module's ELF file, a special section, `.modinfo`, is used
+to store information about this module. It includes the name, paramter type,
+parameter name, license, author, etc.
+
+For rust module, we have to obey this rule. The expanded rust code has self
+expained:
+
+```rust
+#[cfg(MODULE)]
+#[link_section = ".modinfo"]
+#[used]
+pub static __example_module_author: [u8; 18] = *b"author=Douglas Su\0";
+
+#[cfg(MODULE)]
+#[link_section = ".modinfo"]
+#[used]
+pub static __example_module_description: [u8; 30] = *b"description=An example module\0";
+
+#[cfg(MODULE)]
+#[link_section = ".modinfo"]
+#[used]
+pub static __example_module_license: [u8; 15] = *b"license=GPL v2\0";
+
+#[cfg(MODULE)]
+#[link_section = ".modinfo"]
+#[used]
+pub static __example_module_parmtype_uint_param: [u8; 24] = *b"parmtype=uint_param:u32\0";
+
+#[cfg(MODULE)]
+#[link_section = ".modinfo"]
+#[used]
+pub static __example_module_parm_uint_param: [u8; 31] = *b"parm=uint_param:uint parameter\0";
+```
+
+A special directive `#[link_section()]` tells Rust compiler which section the
+data or code it annotated will be placed in. For our example, the section
+is `.modinfo`.
+
+## Kernel module
+
+Module parameter is defined in `module!{ }` macro:
+
+```rust
+module! {
+    ...
+    params: {
+        uint_param: u32 {
+            default: 1,
+            permissions: 0o644,
+            description: b"uint parameter",
+        },
+    },
+}
+```
+
+After macro expansion:
+
+```rust
+static mut __example_module_uint_param_value: u32 = 1;
+
+struct __example_module_uint_param;
+
+impl __example_module_uint_param {
+    fn read<'lck>(
+        &self,
+        lock: &'lck kernel::KParamGuard,
+    ) -> &'lck <u32 as kernel::module_param::ModuleParam>::Value {
+        unsafe {
+            <u32 as kernel::module_param::ModuleParam>::value(&__example_module_uint_param_value)
+        }
+    }
+}
+
+const uint_param: __example_module_uint_param = __example_module_uint_param;
+```
+
+The actual variable in which our value is stored is mangled to
+`__example_module_uint_param_value`. Then, a new structure
+`struct __example_module_uint_param;` is defined and implemented a member
+function, say `read()`, on it. The function takes the parameter lock as its
+variable to prevent from concurrent acesses to our variable.
+
+We re-defined a new variable which has the same name as our parameter variable,
+i.e. `uint_param`, but has the type of `__example_module_uint_param`. Later,
+module programmer can use this variable as:
+
+```rust
+let lock = THIS_MODULE.kernel_param_lock();
+pr_info!("uint_param = {:p}\n", uint_param.read(&lock));
+```
+
+## Build `__param` section
+
+Previous chapter introduces `__param` section in ELF file and how module loader
+process this section during loading time.
+
+For Rust code, we have to build this section consistent with its C counterpart.
+The `module!{ }` macro takes care of this, and you can find codes generated
+from this macro like this:
+
+```rust
+#[repr(transparent)]
+struct __example_module_uint_param_RacyKernelParam(kernel::bindings::kernel_param);
+unsafe impl Sync for __example_module_uint_param_RacyKernelParam {}
+
+#[cfg(MODULE)]
+const __example_module_uint_param_name: *const kernel::c_types::c_char =
+    b"uint_param\0" as *const _ as *const kernel::c_types::c_char;
+
+#[link_section = "__param"]
+#[used]
+static __example_module_uint_param_struct: __example_module_uint_param_RacyKernelParam =
+    __example_module_uint_param_RacyKernelParam(kernel::bindings::kernel_param {
+        name: __example_module_uint_param_name,
+
+    #[cfg(MODULE)]
+    mod_: unsafe { &kernel::bindings::__this_module as *const _ as *mut _ },
+    ops: unsafe { &kernel::module_param::PARAM_OPS_U32 }
+        as *const kernel::bindings::kernel_param_ops,
+    perm: 0o644,
+    level: -1,
+    flags: 0,
+    __bindgen_anon_1: kernel::bindings::kernel_param__bindgen_ty_1 {
+        arg: unsafe { &__example_module_uint_param_value } as *const _
+            as *mut kernel::c_types::c_void,
+    },
+});
+```
+
+`struct __example_module_uint_param_RacyKernelParam` is a wrapper of
+`kernel::bindings::kernel_param`. `kernel_param` in kernel describes single
+parameter in module. We have detailed this in previous chapter, and for
+convenience I paste it here again:
+
+```c
+struct kernel_param {
+    const char *name;
+    struct module *mod;
+    const struct kernel_param_ops *ops;
+    const u16 perm;
+    s8 level;
+    u8 flags;
+    union {
+            void *arg;
+            const struct kparam_string *str;
+            const struct kparam_array *arr;
+    };
+};
+```
+
+The Rust part is a mimic of C structure which initialized each field with
+Rust code, either in FFI or rust variable. The structure then is compiled into
+`__param` section due the the `#[link_section = "__param"]` annotation.
+
+However, the `ops` field is a little bit special. It is assigned
+`&kernel::module_param::PARAM_OPS_U32`.
+
+This variable is defined via a macro `make_param_ops!()`, and expanded during
+kernel compiling time. For `PARAM_OPS_U32`, it is define as:
+
+```rust
+make_param_ops!(
+    /// Rust implementation of [`kernel_param_ops`](../../../include/linux/moduleparam.h)
+    /// for [`u32`].
+    PARAM_OPS_U32,
+    u32
+);
+```
 
 
