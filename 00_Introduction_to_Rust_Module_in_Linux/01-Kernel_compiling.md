@@ -6,7 +6,7 @@
 For now, rust for Linux is still in developing which means the development continuously takes advantages of latest rust compiler. So, a nightly Rust compiler is necessary to prevent from potential BUGs.
 
 ```
-rustup default nightly-2021-02-20
+rustup override set 1.57.0
 ```
 
 ### Install bindgen
