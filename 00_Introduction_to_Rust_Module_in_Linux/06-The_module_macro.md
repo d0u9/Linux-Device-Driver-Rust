@@ -8,7 +8,7 @@ It is noticeable that macros in Rust is not identical to macros in C. For macros
 in C language, it works almost in a string substitution style. C's macros
 expands strings recursively. However, for Rust's macros, they are categorised
 into two types: declarative macros with `macro_rules!` and three kinds of
-procedural macros. For declarative macros, they [hygienic macros]. For
+procedural macros. For declarative macros, they are [hygienic macros]. For
 procedural macros, they are [not hygiene]. All in all, Rust's macros are
 string substitution. For our `module! {}` macro, a function-like macro, it is
 a procedural macro.
