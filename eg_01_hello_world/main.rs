@@ -1,8 +1,7 @@
-#![no_std]
-#![feature(allocator_api, global_asm)]
 #![allow(missing_docs)]
 
 use kernel::prelude::*;
+use kernel::{str::CStr, ThisModule};
 
 module! {
     type: HelloWorld,
@@ -14,7 +13,7 @@ module! {
 
 struct HelloWorld;
 
-impl KernelModule for HelloWorld {
+impl kernel::Module for HelloWorld {
     fn init(_name: &'static CStr, _module: &'static ThisModule) -> Result<Self> {
         pr_info!("Hello world from rust!\n");
 

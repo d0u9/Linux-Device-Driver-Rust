@@ -3,10 +3,10 @@
 
 ### Install nightly Rust
 
-For now, rust for Linux is still in developing which means the development continuously takes advantages of latest rust compiler. So, a nightly Rust compiler is necessary to prevent from potential BUGs.
+For now, rust for Linux is still in development that means the project continuously takes advantages from latest rust compiler. So, a proper Rust compiler version is necessary to prevent from potential BUGs.
 
 ```
-rustup override set 1.57.0
+rustup override set $(scripts/min-tool-version.sh rustc)
 ```
 
 ### Install bindgen
@@ -14,7 +14,7 @@ rustup override set 1.57.0
 `bindgen` is used to generate rust code from C side.
 
 ```
-cargo install --locked --version 0.56.0 bindgen
+cargo install --locked --version $(scripts/min-tool-version.sh bindgen) bindgen
 ```
 
 ### Install standard library source
