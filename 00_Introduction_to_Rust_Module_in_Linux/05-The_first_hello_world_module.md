@@ -10,23 +10,22 @@ The code is not very long, and is very concise. I paste the holistic Rust part
 in below:
 
 ```rust
-#![no_std]
-#![feature(allocator_api, global_asm)]
+#![allow(missing_docs)]
 
 use kernel::prelude::*;
 
 module! {
     type: HelloWorld,
-    name: b"hello_world",
-    author: b"d0u9",
-    description: b"A simple hello world example",
-    license: b"GPL v2",
+    name: "hello_world",
+    authors: ["Douglas Su"],
+    description: "A simple hello world example",
+    license: "GPL v2",
 }
 
 struct HelloWorld;
 
-impl KernelModule for HelloWorld {
-    fn init() -> Result<Self> {
+impl kernel::Module for HelloWorld {
+    fn init(_module: &'static ThisModule) -> Result<Self> {
         pr_info!("Hello world from rust!\n");
 
         Ok(HelloWorld)
@@ -42,39 +41,41 @@ impl Drop for HelloWorld {
 
 You can find the entire project in [eg_01_hello_world] directory in this repo.
 I omit the Makefile for building this module out of source tree. The Makefile
-is identical to its C counterpart. The Kbuild system takes care of every thing.
+is identical to its C counterpart. The Kbuild system takes care of everything.
 
 To build this project, run this command:
 
 ```
-LIBCLANG_PATH=/path/to/libclang make KERNELDIR=/rust/linux/kernel LLVM=1 modules
+make KERNELDIR=/path/to/kernel/source modules
 ```
 
-Again, the Linux Kernel must be compiled by clang and llvm beforehand instead of
-GCC for our Rust example. GCC maybe works, but not tested in my circumstance.
-
-`LIBCLANG_PATH` is an environment which points the `libclang` library. We have
-talked `libclang` in previous chapter. Its duty is making code generation for
-our target host.
+`KERNELDIR` points to a kernel source tree built with Rust support enabled.
+The `rustc` used here must be exactly the same version as the one used to build
+that kernel, otherwise `rustc` refuses to load the kernel's crates with an
+error like `found crate core compiled by an incompatible version of rustc`.
 
 ## Notes on code
 
 If you are a rustacean, you will be very familiar with this code. However, for
-guys who has been a rustacean not very long, like me, I will pin some key points
+guys who have been a rustacean not very long, like me, I will pin some key points
 out to help people understanding this code.
 
 The first one worthy to mention is `#![no_std]` attribute which prevents Rust
 from using standard library. Standard library is of course not accessible from
-Kernel space. We have spent a lot words before to talk about this topic.
+Kernel space. We have spent a lot of words before to talk about this topic.
 `libcore` is a replacement (It seems word replacement is not very accurate) of
 `libstd` for Rust in situations that no standard library is available.
 `#![no_std]` attribute tells Rust compiler that this source file contains
 nothing from standard library and doesn't need it at all. It is very suitable
-for situations as development rust in the Kernel.
+for situations as development rust in the Kernel. This attribute is not written
+in our code, because Kbuild adds it to every Rust module with
+`-Zcrate-attr=no_std`.
 
-`#![feature(allocator_api, global_asm)]` is a Rust's attribute used to enable
-unstable or experimental compiler features. A list of unstable features can
-be found here: https://doc.rust-lang.org/unstable-book/index.html
+In the same way, the unstable compiler features used by modules are enabled by
+Kbuild, so no `#![feature(...)]` attribute is needed either.
+
+`#![allow(missing_docs)]` silences the warning Kernel emits for items without
+documentation comments.
 
 `use kernel::prelude::*;` tells that use our own kernel crate.
 
@@ -82,16 +83,27 @@ be found here: https://doc.rust-lang.org/unstable-book/index.html
 
 `struct HelloWorld;` is the body of our kernel module.
 
-`impl KernelModule for HelloWorld`: implement `KernelModule` trait on our own
-`HelloWorld` structure. This trait is the entrypoint of our kernel module.
-`KernelModule` trait contains an `init()` method which will be invoked during
-the loading process of our module. It behaves like C's `module_init()` function.
+`impl kernel::Module for HelloWorld`: implement `kernel::Module` trait on our
+own `HelloWorld` structure. This trait is the entrypoint of our kernel module.
+`kernel::Module` trait contains an `init()` method which will be invoked during
+the loading process of our module. It takes a `&'static ThisModule` referring to
+our module. It behaves like C's `module_init()` function.
 
 `impl Drop for HelloWorld`: implement `Drop` trait on our own `HelloWorld`
 structure. `Drop` trait is a Rust's standard trait. Types with `Drop` trait
 implemented will be deconstructed when its lifetime ended via calling `drop()`
-method of `Drop` trait. `Drop` trait here almost an identical to C's
+method of `Drop` trait. `Drop` trait here is almost identical to C's
 `module_exit()` function.
+
+## Evolution
+
+- Every Rust module used to start with `#![no_std]` and
+  `#![feature(allocator_api, global_asm)]`. Kbuild adds both now.
+- The module trait used to be `KernelModule` with `fn init() -> Result<Self>`.
+  It was renamed to `kernel::Module`, and `init()` took the module name and
+  `&'static ThisModule`. The name argument has since been dropped.
+- The fields of `module! { }` used to be byte strings, e.g. `b"hello_world"`,
+  and the author was given by `author`. See the next article for details.
 
 [eg_01_hello_world]: ../eg_01_hello_world
 [Function-like macro]: https://doc.rust-lang.org/reference/procedural-macros.html#function-like-procedural-macros

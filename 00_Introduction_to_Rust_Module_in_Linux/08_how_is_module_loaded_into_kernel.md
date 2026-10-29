@@ -20,10 +20,13 @@ The whole process can be divided into several steps:
 ## Copy file from user space to kernel space
 
 Loading from user space is implemented via a specific system call [init_module].
-This system call takes three paramters: 1. The buffer in which ko file fills; 2.
+This system call takes three parameters: 1. The buffer in which ko file fills; 2.
 The size of buffer; 3, a parameter string.
 
-This system call is defined in file [kernel/module.c], and it is defined as:
+Today's `insmod` (from kmod) uses its sibling system call `finit_module`, which
+takes a file descriptor instead of a buffer. Both end up in `load_module()`.
+
+This system call is defined in file [kernel/module/main.c], and it is defined as:
 
 ```c
 SYSCALL_DEFINE3(init_module, void __user *, umod,
@@ -38,7 +41,7 @@ Then, calls `load_module()` function which does the heavy duties.
 
 ## Module verification
 
-`load_module()` function is defined in [kernel/module.c] as well. It is a long
+`load_module()` function is defined in [kernel/module/main.c] as well. It is a long
 function that does the actual work to load and run a kernel module. At the
 very beginning of this function, some verifications are taken to make sure that
 the module will be loaded is valid and matches our kernel version.
@@ -62,13 +65,16 @@ if (err)
 
 /*
  * Do basic sanity checks against the ELF header and
- * sections.
+ * sections. Cache useful sections and set the
+ * info->mod to the userspace passed struct module.
  */
-err = elf_validity_check(info);
-if (err) {
-    pr_err("Module has invalid ELF structures\n");
+err = elf_validity_cache_copy(info, flags);
+if (err)
     goto free_copy;
-}
+
+err = early_mod_check(info, flags);
+if (err)
+    goto free_copy;
 ```
 
 ## Parsing module file
@@ -98,10 +104,11 @@ To see what sections are contained in an ELF file, use `readelf` command:
 readelf -S test_module.ko
 ```
 
-The function `setup_load_info()` defined in [kernel/module.c] reads module file
-and fill some fields of `struct load_info *info` according to module file. The
+The function `elf_validity_cache_copy()` defined in [kernel/module/main.c] reads
+module file and fills some fields of `struct load_info *info` according to
+module file. The
 field `hdr` is special for that this field points to the buffer in which module
-file residents. This field is assigned in `copy_module_from_user()` function:
+file resides. This field is assigned in `copy_module_from_user()` function:
 
 ```c
 info->hdr = __vmalloc(info->len, GFP_KERNEL | __GFP_NOWARN);
@@ -124,15 +131,16 @@ setting up module parameter, I will detail some interested procedures.
 
 ### Get module info
 
-Module informations include module name, license, author, parameter type,
-parameter description, etc. These informations are packed in `.modinfo` section
+Module information includes module name, license, author, parameter type,
+parameter description, etc. This information is packed in `.modinfo` section
 in ELF file(module file).
 
 To read `.modinfo` section, first we need to find the index of section. Use
-function `find_sec()` to get the index of a specific section with section name:
+function `find_any_unique_sec()` to get the index of a specific section with
+section name:
 
 ```
-info->index.info = find_sec(info, ".modinfo");
+info_idx = find_any_unique_sec(info, ".modinfo");
 ```
 
 Then obtain a specific field in `.modinfo` section by invoking `get_modinfo()`:
@@ -142,7 +150,8 @@ info->name = get_modinfo(info, "name");
 ```
 
 For users who curious about the content of `.modinfo` section, use `readelf`
-command to inspect:
+command to inspect (the outputs of `readelf` and kernel logs in this article
+were taken on Linux 5.12):
 
 ```
 readelf -x .modinfo test_module.ko
@@ -182,7 +191,7 @@ value string by key.
 ### Get `__param` section
 
 `struct module` is the data structure that describes the module currently
-processing. some fields are points to elf sections. For example, `mod->kp` filed
+processing. some fields are points to elf sections. For example, `mod->kp` field
 points to the `__param` section in ELF file.
 
 `__param` section in ELF is an empty table which will be filled during
@@ -211,10 +220,10 @@ static u32 uint_param = 1;
 module_param(uint_param, uint, S_IRUGO);
 ```
 
-The first line syas we defined a global variable of type `u32` and initialized
+The first line says we defined a global variable of type `u32` and initialized
 its value to `1`.
 
-The second line is a macro to declare a module paramter. The macro defined as 
+The second line is a macro to declare a module parameter. The macro defined as 
 below recursively.
 
 ```c
@@ -256,7 +265,7 @@ below recursively.
 
 For our example, `module_param(uint_param, uint, S_IRUGO)`, it is finally
 expanded as (I have removed some GCC attributes which are unnecessary for us
-to understand the mechanisim):
+to understand the mechanism):
 
 ```c
 static const char __param_str_uint_param[] = "uint_param";
@@ -332,7 +341,7 @@ struct kernel_param {
 The `name` field is a pointer to `const char` which is initialized to
 `__param_str_uint_param`; The `perm` field is assigned as `S_IRUGO`; The `arg`
 pointer in union is initialized to the address of our `uint_param` global
-variable; The `ops` filed has type of `struct kernel_param_ops` in which three
+variable; The `ops` field has type of `struct kernel_param_ops` in which three
 pointers to functions are included.
 
 ```c
@@ -345,7 +354,7 @@ struct kernel_param_ops {
 ```
 
 The `set` and `get` functions are used to set and get our variable values.
-For our module parameter, the `ops` filed points to a pre-defined function
+For our module parameter, the `ops` field points to a pre-defined function
 in kernel, `param_ops_uint`.
 
 ```c
@@ -376,14 +385,14 @@ Expanded to:
 ```c
 int param_set_uint(const char *val, const struct kernel_param *kp)
 {
-        return strtolfn(val, 0, (type *)kp->arg);
+        return kstrtouint(val, 0, (unsigned int *)kp->arg);
 }
 
 int param_get_uint(char *buffer, const struct kernel_param *kp)
 {
-        return scnprintf(buffer, PAGE_SIZE, format "\n",
-                 *((type *)kp->arg));
- }
+        return scnprintf(buffer, PAGE_SIZE, "%u" "\n",
+                 *((unsigned int *)kp->arg));
+}
 const struct kernel_param_ops param_ops_uint = {
         .set = param_set_uint,
         .get = param_get_uint,
@@ -405,7 +414,7 @@ of book "Computer Systems: A programmer's Perspective".
 
 The third variable `__UNIQUE_ID_uint_paramtye` is also a array of chars in
 which a special string "parmtype=uint_param:uint" is written in. This variable
-is linked into `modiinfo` section and be used by tools such as `modinfo` to
+is linked into `.modinfo` section and be used by tools such as `modinfo` to
 fetch information about this module.
 
 ### Apply relocation
@@ -443,7 +452,7 @@ union {
 };
 ```
 
-It has the value `0xffffffc0336000`, i.e. the address of kernel parameter. This
+It has the value `0xffffffffc0336000`, i.e. the address of kernel parameter. This
 is verified by looking the kernel log that we print this address by `pr_info()`
 function in our code.
 
@@ -496,12 +505,12 @@ ret = parse_one(param, val, doing, params, num,
 				min_level, max_level, arg, unknown);
 ```
 
-For each parameter passed in, first compare the parameter name against paramters
+For each parameter passed in, first compare the parameter name against parameters
 in `__param` (Note: params[] is an array of type `struct kernel_param` which
 is read directly from `__param` section after relocation). Then, after some
 checks, set the variable value by calling `set()` function on it.
 
-For our `uint` type parameter, this is done via `strtolfn()` function actually.
+For our `uint` type parameter, this is done via `kstrtouint()` function actually.
 
 ```c
 if (parameq(param, params[i].name)) {
@@ -534,22 +543,24 @@ taken.
 These two macros are expanded to:
 
 ```c
-static inline \
+static inline
 initcall_t __inittest(void)
 {
     return m_init;
 }
-int init_module(void) __attribute__((alias("m_init")));;
+int init_module(void) __copy(m_init) __attribute__((alias("m_init")));
+___ADDRESSABLE(init_module, __initdata);
 
 static inline
 exitcall_t __exittest(void)
 {
     return m_exit;
 }
-void cleanup_module(void) __attribute__((alias("m_exit")));;
+void cleanup_module(void) __copy(m_exit) __attribute__((alias("m_exit")));
+___ADDRESSABLE(cleanup_module, __exitdata);
 ```
 
-I have removed GCC's attributes to make codes more concise.
+I have removed some GCC's attributes to make codes more concise.
 
 `initcall_t` and `exitcall_t` are types defined as:
 
@@ -564,13 +575,18 @@ the if the functions passed in macro matches the signature.
 The next two lines:
 
 ```c
-int init_module(void) __attribute__((alias("m_init")));;
-void cleanup_module(void) __attribute__((alias("m_exit")));;
+int init_module(void) __copy(m_init) __attribute__((alias("m_init")));
+void cleanup_module(void) __copy(m_exit) __attribute__((alias("m_exit")));
 ```
 
 A special [alias attribute] `__attribute__((alias()));` is used. This attribute
 defines `m_init` to be a weak alias for `init_module` and `m_exit` to be a weak
-alias for `cleanup_module` symbol.
+alias for `cleanup_module` symbol. `__copy()` copies the attributes of `m_init`
+and `m_exit`, such as `__init`, to the aliases.
+
+`___ADDRESSABLE()` takes the address of the alias in a static variable, so the
+compiler and linker do not drop it. The Rust `module!` macro generates the same
+thing, `__UNIQUE_ID___addressable_init_module`.
 
 ## `init` and `exit` fields in `struct module`
 
@@ -586,17 +602,21 @@ mod = (void *)info->sechdrs[info->index.mod].sh_addr;
 ```
 
 The `info->sechdrs[]` is an array of ELF section headers. The section index
-we referenced here is `info->index.mod` which is assigned in `setup_load_info()`
-function:
+we referenced here is `info->index.mod` which is assigned in `elf_validity_cache_index_mod()`
+function, called by `elf_validity_cache_copy()`:
 
 ```c
-info->index.mod = find_sec(info, ".gnu.linkonce.this_module");
-if (!info->index.mod) {
-    pr_warn("%s: No module found in object\n",
-        info->name ?: "(missing .modinfo section or name field)");
+mod_idx = find_any_unique_sec(info, ".gnu.linkonce.this_module");
+if (mod_idx <= 0) {
+    pr_err("module %s: Exactly one .gnu.linkonce.this_module section must exist.\n",
+           info->name ?: "(missing .modinfo section or name field)");
     return -ENOEXEC;
 }
+...
+info->index.mod = mod_idx;
 ```
+
+It also checks that the size of this section equals `sizeof(struct module)`.
 
 Conclude from all above, `struct module` is initialized directly from
 `.gnu.linkonce.this_module` section in ELF file.
@@ -657,9 +677,22 @@ During the final linkage stage, all these object pieces are linked together into
 During module loading process, `struct module` is read out from this ELF section
 directly, and our puzzle is resolved.
 
+## Evolution
 
-[init_module]: https://man7.org/linux/man-pages/man2/init_module.2.html]
-[kernel/module.c]: https://github.com/torvalds/linux/blob/master/kernel/module.c
+- Module loading used to be implemented in a single file, `kernel/module.c`.
+  It is split into files in `kernel/module/`, and loading is in
+  `kernel/module/main.c`.
+- `insmod` used to call `init_module()` with the content of the file. It
+  calls `finit_module()` with a file descriptor now.
+- `elf_validity_check()` used to check the ELF file, and `setup_load_info()`
+  found the sections such as `.gnu.linkonce.this_module`. Both jobs are done by
+  `elf_validity_cache_copy()` now, followed by `early_mod_check()`.
+- `module_init()` and `module_exit()` used to only define the aliases. They
+  also copy the attributes of the functions with `__copy()` and keep the
+  aliases with `___ADDRESSABLE()` now.
+
+[init_module]: https://man7.org/linux/man-pages/man2/init_module.2.html
+[kernel/module/main.c]: https://github.com/torvalds/linux/blob/master/kernel/module/main.c
 [include/uapi/linux/elf.h]: https://github.com/torvalds/linux/blob/master/include/uapi/linux/elf.h
 [ELF]: https://en.wikipedia.org/wiki/Executable_and_Linkable_Format
 [alias attribute]: https://gcc.gnu.org/onlinedocs/gcc-4.7.2/gcc/Function-Attributes.html
