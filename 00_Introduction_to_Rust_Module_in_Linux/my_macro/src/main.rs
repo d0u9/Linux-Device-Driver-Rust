@@ -1,4 +1,3 @@
-extern crate my_macros;
 use my_macros::answer_fn;
 
 answer_fn!();
