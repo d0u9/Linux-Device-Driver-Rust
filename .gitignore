@@ -39,3 +39,5 @@
 .tmp_versions
 *.swp
 target
+*.mod
+*.o.d
