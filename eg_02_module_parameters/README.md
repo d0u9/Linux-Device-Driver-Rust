@@ -1,5 +1,5 @@
 ```
-make KERNELDIR=/path/to/kernel/source modules
+make KDIR="$LDD_ROOT/src/linux-stable" modules
 ```
 
 This example used to have a string parameter, `whom`, to choose whom to greet.

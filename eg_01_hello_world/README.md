@@ -1,3 +1,3 @@
 ```
-make KERNELDIR=/path/to/kernel/source modules
+make KDIR="$LDD_ROOT/src/linux-stable" modules
 ```

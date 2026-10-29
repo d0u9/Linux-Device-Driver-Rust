@@ -6,7 +6,7 @@ tree, not in this repository. Paths such as `scripts/min-tool-version.sh` are
 relative to the kernel source tree:
 
 ```
-cd /path/to/kernel/source/
+cd "$LDD_ROOT/src/linux-stable"
 ```
 
 ### Install Rust

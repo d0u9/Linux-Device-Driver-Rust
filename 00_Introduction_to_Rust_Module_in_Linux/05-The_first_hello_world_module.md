@@ -46,10 +46,10 @@ is identical to its C counterpart. The Kbuild system takes care of everything.
 To build this project, run this command:
 
 ```
-make KERNELDIR=/path/to/kernel/source modules
+make KDIR="$LDD_ROOT/src/linux-stable" modules
 ```
 
-`KERNELDIR` points to a kernel source tree built with Rust support enabled.
+`KDIR` points to a kernel source tree built with Rust support enabled.
 The `rustc` used here must be exactly the same version as the one used to build
 that kernel, otherwise `rustc` refuses to load the kernel's crates with an
 error like `found crate core compiled by an incompatible version of rustc`.

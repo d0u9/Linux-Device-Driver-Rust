@@ -6,15 +6,15 @@ obj-m := hello_world.o
 
 else
 # In normal make context
-KERNELDIR ?= /lib/modules/$(shell uname -r)/build
+KDIR ?= /lib/modules/$(shell uname -r)/build
 PWD := $(shell pwd)
 
 .PHONY: modules
 modules:
-	$(MAKE) -C $(KERNELDIR) M=$(PWD) modules
+	$(MAKE) -C $(KDIR) M=$(PWD) modules
 
 .PHONY: clean
 clean:
-	$(MAKE) -C $(KERNELDIR) M=$(PWD) clean
+	$(MAKE) -C $(KDIR) M=$(PWD) clean
 
 endif
