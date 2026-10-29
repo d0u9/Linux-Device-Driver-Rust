@@ -1,4 +1,3 @@
 ```
-LIBCLANG_PATH=/path/to/libclang make KERNELDIR=/rust/linux/kernel LLVM=1 modules
+make KERNELDIR=/path/to/kernel/source modules
 ```
-

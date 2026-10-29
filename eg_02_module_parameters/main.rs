@@ -1,37 +1,29 @@
-#![no_std]
-#![feature(allocator_api, global_asm)]
+#![allow(missing_docs)]
 
 use kernel::prelude::*;
 
 module! {
     type: ModuleParameter,
-    name: b"hello_world",
-    author: b"d0u9",
-    description: b"A simple hello world example",
-    license: b"GPL v2",
+    name: "module_parameters",
+    authors: ["d0u9"],
+    description: "Module parameters example",
+    license: "GPL v2",
     params: {
         howmany: i32 {
             default: 3,
-            permissions: 0o644,
-            description: b"How many times string will be printed",
-        },
-        whom: str {
-            default: b"Mom",
-            permissions: 0o644,
-            description: b"What string to be printed",
+            description: "How many times string will be printed",
         },
     },
 }
 
 struct ModuleParameter;
 
-impl KernelModule for ModuleParameter {
-    fn init() -> Result<Self> {
+impl kernel::Module for ModuleParameter {
+    fn init(_module: &'static ThisModule) -> Result<Self> {
         pr_info!("Hello world from rust!\n");
 
-        let lock = THIS_MODULE.kernel_param_lock();
-        for i in 0..*howmany.read(&lock) {
-            pr_info!("{} Hello, {}\n", i, core::str::from_utf8(whom.read(&lock))?);
+        for i in 0..*module_parameters::howmany.value() {
+            pr_info!("{} Hello, Mom\n", i);
         }
 
         Ok(ModuleParameter)

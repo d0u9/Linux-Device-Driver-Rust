@@ -1,8 +1,8 @@
 ifneq ($(KERNELRELEASE),)
 
 # In kbuild context
-hello_world-objs := main.o
-obj-m := hello_world.o
+module_parameters-objs := main.o
+obj-m := module_parameters.o
 
 else
 # In normal make context
