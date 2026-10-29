@@ -1,1 +1,1 @@
-- [00_dir_tree.md](https://github.com/d0u9/Linux-Device-Driver/blob/draft/00_preface/00_dir_tree.md)
+- [00_dir_tree.md](https://github.com/d0u9/Linux-Device-Driver/blob/master/docs/00_preface/00_dir_tree.md)
